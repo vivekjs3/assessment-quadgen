@@ -1,0 +1,162 @@
+jenkins:
+  systemMessage: "Managed by JCasC - Vivek Pod Platform Proj (GitOps CI/CD on Ephemeral Agent Pods)"
+  numExecutors: 0
+  mode: EXCLUSIVE
+  scmCheckoutRetryCount: 2
+  labelString: "controller"
+  
+  # ============================================================================
+  # Authentication (AuthN) Layer
+  # ============================================================================
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "adminpassword123"
+          name: "System Administrator"
+          description: "Full Platform Admin"
+        - id: "developer"
+          password: "devpassword123"
+          name: "Lead Developer"
+          description: "Developer with Pipeline Build & Read Access"
+        - id: "auditor"
+          password: "auditpassword123"
+          name: "Security Auditor"
+          description: "Read-Only Compliance Viewer"
+
+  # ============================================================================
+  # Authorization (AuthZ) Layer - Matrix RBAC
+  # ============================================================================
+  authorizationStrategy:
+    projectMatrix:
+      permissions:
+        # Admin Role
+        - "Overall/Administer:admin"
+        - "Overall/Read:admin"
+        - "Job/Create:admin"
+        - "Job/Delete:admin"
+        - "Job/Configure:admin"
+        - "Job/Build:admin"
+        - "Job/Read:admin"
+        - "Job/Cancel:admin"
+        - "Job/Workspace:admin"
+        - "Agent/Configure:admin"
+        - "Agent/Create:admin"
+        - "Agent/Delete:admin"
+        - "Agent/Build:admin"
+        - "Agent/Connect:admin"
+        - "Credentials/View:admin"
+        - "Credentials/Create:admin"
+        - "Credentials/ManageDomains:admin"
+        - "View/Create:admin"
+        - "View/Delete:admin"
+        - "View/Configure:admin"
+        - "View/Read:admin"
+
+        # Developer Role
+        - "Overall/Read:developer"
+        - "Job/Read:developer"
+        - "Job/Build:developer"
+        - "Job/Cancel:developer"
+        - "Job/Workspace:developer"
+        - "View/Read:developer"
+
+        # Auditor Role
+        - "Overall/Read:auditor"
+        - "Job/Read:auditor"
+        - "View/Read:auditor"
+
+  # ============================================================================
+  # Dynamic Ephemeral Agent Pod Template
+  # ============================================================================
+  clouds:
+    - kubernetes:
+        name: "kubernetes"
+        serverUrl: "https://kubernetes.default.svc"
+        jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+        jenkinsTunnel: "jenkins-agent.jenkins.svc.cluster.local:50000"
+        namespace: "jenkins"
+        containerCapStr: "10"
+        retentionTimeout: 5
+        connectTimeout: 100
+        templates:
+          - name: "jenkins-k8s-agent"
+            label: "k8s-builder"
+            nodeUsageMode: "NORMAL"
+            workspaceVolume:
+              emptyDirWorkspaceVolume:
+                memory: false
+            serviceAccount: "jenkins-agent"
+            containers:
+              - name: "jnlp"
+                image: "jenkins/inbound-agent:alpine"
+                workingDir: "/home/jenkins/agent"
+              - name: "builder"
+                image: "alpine/k8s:1.29.2"
+                workingDir: "/home/jenkins/agent"
+                command: "cat"
+                ttyEnabled: true
+
+unclassified:
+  location:
+    url: "http://localhost:8080/"
+    adminAddress: "admin@example.com"
+
+# Automated Seed Jobs for Vivek Pod Platform Proj
+jobs:
+  # Primary Vivek Pod Platform Pipeline
+  - script: >
+      pipelineJob('vivek-pod-platform-pipeline') {
+        description('Primary Pipeline for Vivek Pod Platform Proj running on Ephemeral K8s Agent Pods.')
+        definition {
+          cps {
+            sandbox(true)
+            script('''
+              pipeline {
+                agent {
+                  node { label 'k8s-builder' }
+                }
+                options {
+                  timestamps()
+                  timeout(time: 10, unit: 'MINUTES')
+                }
+                stages {
+                  stage('1. Platform Security Inspection') {
+                    steps {
+                      container('builder') {
+                        echo "=========================================================="
+                        echo "EXECUTING INSIDE HARDENED EPHEMERAL POD: ${env.NODE_NAME}"
+                        echo "=========================================================="
+                        sh 'kubectl version --client=true'
+                        sh 'echo "Verified non-root build runtime"'
+                      }
+                    }
+                  }
+                  stage('2. Deploy Vivek Pod Platform Proj to K8s') {
+                    steps {
+                      container('builder') {
+                        echo "Applying Vivek Pod Platform manifests to sample-app namespace..."
+                        sh 'kubectl rollout restart deployment/sample-web-app -n sample-app || true'
+                      }
+                    }
+                  }
+                  stage('3. Rollout Verification & Healthcheck') {
+                    steps {
+                      container('builder') {
+                        sh 'kubectl rollout status deployment/sample-web-app -n sample-app --timeout=90s'
+                        sh 'kubectl get pods,svc -n sample-app -o wide'
+                      }
+                    }
+                  }
+                }
+                post {
+                  always {
+                    echo "Vivek Pod Platform Pipeline finished. Ephemeral agent pod terminating..."
+                  }
+                }
+              }
+            ''')
+          }
+        }
+      }

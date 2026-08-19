@@ -1,0 +1,21 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  # Listen on 0.0.0.0 so both localhost and Proxmox VM/LXC LAN IP can access services
+  apiServerAddress: "0.0.0.0"
+  apiServerPort: 6443
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 30080
+    hostPort: 8080
+    listenAddress: "0.0.0.0"
+    protocol: TCP
+  - containerPort: 30081
+    hostPort: 8081
+    listenAddress: "0.0.0.0"
+    protocol: TCP
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"

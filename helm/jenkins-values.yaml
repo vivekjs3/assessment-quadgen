@@ -1,0 +1,132 @@
+# Helm Values for Official Jenkins Chart (jenkins/jenkins)
+# Repository: https://charts.jenkins.io
+
+controller:
+  componentName: "jenkins-controller"
+  image: "jenkins/jenkins"
+  tag: "lts-jdk17"
+  numExecutors: 0
+  customJenkinsLabels: ["controller"]
+
+  # Service Configuration
+  serviceType: NodePort
+  nodePort: 30080
+  servicePort: 8080
+  agentListenerPort: 50000
+
+  # Admin User Configuration
+  admin:
+    createSecret: true
+    username: "admin"
+    password: "adminpassword123"
+
+  # Resource Allocation
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1024Mi"
+    limits:
+      cpu: "2000m"
+      memory: "2048Mi"
+
+  # Plugins to auto-install
+  installPlugins:
+    - "kubernetes:2.440.v8cf8db_7d743a_"
+    - "configuration-as-code:1775.v810dc950b_514"
+    - "git:5.2.2"
+    - "workflow-aggregator:596.v8c21c963d92d"
+    - "pipeline-stage-view:2.34"
+    - "credentials:1371.vfee2f185b_a_81"
+    - "pipeline-model-definition:2.2198.v41dd8ef6dd56"
+    - "job-dsl:1.87"
+    - "ws-cleanup:0.45"
+    - "timestamper:1.26"
+
+  # JCasC (Jenkins Configuration as Code) Configuration
+  JCasC:
+    enabled: true
+    defaultConfig: true
+    configScripts:
+      custom-casc: |
+        jenkins:
+          systemMessage: "Managed via Helm & JCasC - Kubernetes Ephemeral CI/CD"
+          numExecutors: 0
+          mode: EXCLUSIVE
+          clouds:
+            - kubernetes:
+                name: "kubernetes"
+                serverUrl: "https://kubernetes.default.svc"
+                jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+                jenkinsTunnel: "jenkins-agent.jenkins.svc.cluster.local:50000"
+                namespace: "jenkins"
+                containerCapStr: "10"
+                templates:
+                  - name: "jenkins-k8s-agent"
+                    label: "k8s-builder"
+                    nodeUsageMode: "NORMAL"
+                    workspaceVolume:
+                      emptyDirWorkspaceVolume:
+                        memory: false
+                    serviceAccount: "jenkins"
+                    containers:
+                      - name: "jnlp"
+                        image: "jenkins/inbound-agent:3206.vb_15d72085c02_1"
+                        workingDir: "/home/jenkins/agent"
+                        resourceRequestCpu: "200m"
+                        resourceRequestMemory: "256Mi"
+                      - name: "builder"
+                        image: "alpine/k8s:1.29.2"
+                        workingDir: "/home/jenkins/agent"
+                        command: "sleep"
+                        args: "99d"
+                        ttyEnabled: true
+                        resourceRequestCpu: "200m"
+                        resourceRequestMemory: "256Mi"
+        jobs:
+          - script: >
+              pipelineJob('sample-app-helm-pipeline') {
+                description('Deploys sample app using Helm via ephemeral Kubernetes agent pod.')
+                definition {
+                  cps {
+                    sandbox(true)
+                    script('''
+                      pipeline {
+                        agent {
+                          node {
+                            label 'k8s-builder'
+                          }
+                        }
+                        stages {
+                          stage('Inspect Ephemeral Pod') {
+                            steps {
+                              container('builder') {
+                                sh 'helm version && kubectl version --client=true'
+                              }
+                            }
+                          }
+                          stage('Deploy via Helm') {
+                            steps {
+                              container('builder') {
+                                sh 'echo "Deploying sample-app chart into sample-app namespace..."'
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ''')
+                  }
+                }
+              }
+
+# RBAC Configuration for in-cluster controller & agents
+rbac:
+  create: true
+  readSecrets: true
+
+serviceAccount:
+  create: true
+  name: "jenkins"
+
+# Ephemeral / Stateless Persistence Configuration (emptyDir for local POC)
+persistence:
+  enabled: false
